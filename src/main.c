@@ -119,48 +119,86 @@ static int cmd_kill(unsigned short port, bool force) {
         return 1;
     }
     
-    PortInfo* port_info = find_port_by_number(list, port);
-    if (!port_info) {
+    /* Find all connections on this port */
+    int found_count = 0;
+    pid_t pids[256];  /* Support up to 256 processes on same port */
+    ProcessInfo procs[256];
+    
+    for (size_t i = 0; i < list->count; i++) {
+        if (list->ports[i].port == port && found_count < 256) {
+            pid_t pid = find_pid_by_inode(list->ports[i].inode);
+            if (pid > 0) {
+                /* Check if we already have this PID */
+                bool duplicate = false;
+                for (int j = 0; j < found_count; j++) {
+                    if (pids[j] == pid) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                
+                if (!duplicate) {
+                    pids[found_count] = pid;
+                    if (get_process_info(pid, &procs[found_count])) {
+                        found_count++;
+                    }
+                }
+            }
+        }
+    }
+    
+    port_list_destroy(list);
+    
+    if (found_count == 0) {
         display_error("Port not in use");
-        port_list_destroy(list);
         return 1;
     }
     
-    pid_t pid = find_pid_by_inode(port_info->inode);
-    if (pid <= 0) {
-        display_error("Could not find process for port");
-        port_list_destroy(list);
-        return 1;
-    }
-    
-    ProcessInfo proc;
-    if (get_process_info(pid, &proc)) {
-        printf("Found process: %s (PID %d, User: %s)\n", 
-               proc.command, pid, proc.user);
+    /* Display all processes using this port */
+    printf("Found %d process%s using port %u:\n", 
+           found_count, found_count > 1 ? "es" : "", port);
+    for (int i = 0; i < found_count; i++) {
+        printf("  %d. %s (PID %d, User: %s)\n", 
+               i + 1, procs[i].command, pids[i], procs[i].user);
     }
     
     /* Ask for confirmation unless force is used */
     if (!force) {
-        printf("Kill this process? [y/N] ");
+        printf("Kill %s process%s? [y/N] ", 
+               found_count > 1 ? "all" : "this",
+               found_count > 1 ? "es" : "");
         char response[10];
         if (fgets(response, sizeof(response), stdin)) {
             if (response[0] != 'y' && response[0] != 'Y') {
                 printf("Cancelled.\n");
-                port_list_destroy(list);
                 return 0;
             }
         }
     }
     
-    if (kill_process(pid, force)) {
-        display_success("Process killed successfully");
-        port_list_destroy(list);
-        return 0;
-    } else {
-        display_error("Failed to kill process (try with sudo?)");
-        port_list_destroy(list);
+    /* Kill all processes */
+    int killed = 0;
+    int failed = 0;
+    for (int i = 0; i < found_count; i++) {
+        if (kill_process(pids[i], force)) {
+            printf("Killed PID %d (%s)\n", pids[i], procs[i].command);
+            killed++;
+        } else {
+            printf("Failed to kill PID %d (%s)\n", pids[i], procs[i].command);
+            failed++;
+        }
+    }
+    
+    if (killed > 0) {
+        display_success("Successfully killed process(es)");
+    }
+    
+    if (failed > 0) {
+        display_error("Some processes could not be killed (try with sudo?)");
         return 1;
     }
+    
+    return 0;
 }
 
 /*
