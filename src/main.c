@@ -1,0 +1,323 @@
+/*
+ * SPDX-License-Identifier: MIT
+ *
+ * Copyright (c) 2025 Aerlync Labs Inc.
+ */
+
+/*
+ * main.c - Entry point for portmap tool
+ * 
+ * This parses command-line arguments and calls the appropriate functions.
+ * This is where execution starts - the main() function.
+ */
+
+#include "port_scanner.h"
+#include "process_manager.h"
+#include "display.h"
+#include "utils.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>  /* For getopt */
+
+/*
+ * Command types - what the user wants to do
+ */
+typedef enum {
+    CMD_LIST,
+    CMD_KILL,
+    CMD_FIND,
+    CMD_CHECK,
+    CMD_HELP,
+    CMD_VERSION
+} Command;
+
+/*
+ * Options for filtering
+ */
+typedef struct {
+    unsigned short port;        /* Specific port to filter */
+    unsigned short range_low;   /* Port range (low) */
+    unsigned short range_high;  /* Port range (high) */
+    bool tcp_only;              /* Show only TCP */
+    bool udp_only;              /* Show only UDP */
+    bool force;                 /* Force kill */
+    DisplayFormat format;       /* Output format */
+} Options;
+
+/*
+ * filter_port_list - Filter ports based on options
+ * 
+ * We create a new list with only matching ports.
+ */
+static PortList* filter_port_list(PortList* original, Options* opts) {
+    if (!opts->port && !opts->range_low && !opts->tcp_only && !opts->udp_only) {
+        return original;  /* No filtering needed */
+    }
+    
+    PortList* filtered = port_list_create();
+    if (!filtered) return original;
+    
+    for (size_t i = 0; i < original->count; i++) {
+        PortInfo* p = &original->ports[i];
+        bool include = true;
+        
+        /* Filter by specific port */
+        if (opts->port && p->port != opts->port) {
+            include = false;
+        }
+        
+        /* Filter by port range */
+        if (opts->range_low && (p->port < opts->range_low || p->port > opts->range_high)) {
+            include = false;
+        }
+        
+        /* Filter by protocol */
+        if (opts->tcp_only && p->protocol != PROTOCOL_TCP) {
+            include = false;
+        }
+        if (opts->udp_only && p->protocol != PROTOCOL_UDP) {
+            include = false;
+        }
+        
+        if (include) {
+            port_list_add(filtered, p);
+        }
+    }
+    
+    return filtered;
+}
+
+/*
+ * cmd_list - Handle "list" command
+ */
+static int cmd_list(Options* opts) {
+    PortList* list = scan_all_ports();
+    if (!list) {
+        display_error("Failed to scan ports");
+        return 1;
+    }
+    
+    PortList* filtered = filter_port_list(list, opts);
+    display_port_list(filtered, opts->format);
+    
+    if (filtered != list) {
+        port_list_destroy(filtered);
+    }
+    port_list_destroy(list);
+    
+    return 0;
+}
+
+/*
+ * cmd_kill - Handle "kill" command
+ */
+static int cmd_kill(unsigned short port, bool force) {
+    PortList* list = scan_all_ports();
+    if (!list) {
+        display_error("Failed to scan ports");
+        return 1;
+    }
+    
+    PortInfo* port_info = find_port_by_number(list, port);
+    if (!port_info) {
+        display_error("Port not in use");
+        port_list_destroy(list);
+        return 1;
+    }
+    
+    pid_t pid = find_pid_by_inode(port_info->inode);
+    if (pid <= 0) {
+        display_error("Could not find process for port");
+        port_list_destroy(list);
+        return 1;
+    }
+    
+    ProcessInfo proc;
+    if (get_process_info(pid, &proc)) {
+        printf("Found process: %s (PID %d, User: %s)\n", 
+               proc.command, pid, proc.user);
+    }
+    
+    /* Ask for confirmation unless force is used */
+    if (!force) {
+        printf("Kill this process? [y/N] ");
+        char response[10];
+        if (fgets(response, sizeof(response), stdin)) {
+            if (response[0] != 'y' && response[0] != 'Y') {
+                printf("Cancelled.\n");
+                port_list_destroy(list);
+                return 0;
+            }
+        }
+    }
+    
+    if (kill_process(pid, force)) {
+        display_success("Process killed successfully");
+        port_list_destroy(list);
+        return 0;
+    } else {
+        display_error("Failed to kill process (try with sudo?)");
+        port_list_destroy(list);
+        return 1;
+    }
+}
+
+/*
+ * cmd_find - Handle "find" command
+ */
+static int cmd_find(const char* search_term) {
+    PortList* list = scan_all_ports();
+    if (!list) {
+        display_error("Failed to scan ports");
+        return 1;
+    }
+    
+    PortList* filtered = port_list_create();
+    
+    for (size_t i = 0; i < list->count; i++) {
+        PortInfo* p = &list->ports[i];
+        pid_t pid = find_pid_by_inode(p->inode);
+        
+        if (pid > 0) {
+            ProcessInfo proc;
+            if (get_process_info(pid, &proc)) {
+                /* Check if command or cmdline contains search term */
+                if (string_contains(proc.command, search_term) || 
+                    string_contains(proc.cmdline, search_term)) {
+                    port_list_add(filtered, p);
+                }
+            }
+        }
+    }
+    
+    display_port_list(filtered, FORMAT_TABLE);
+    
+    port_list_destroy(filtered);
+    port_list_destroy(list);
+    
+    return 0;
+}
+
+/*
+ * cmd_check - Handle "check" command
+ */
+static int cmd_check(unsigned short port) {
+    bool available = is_port_available(port);
+    display_port_availability(port, available);
+    
+    return available ? 0 : 1;
+}
+
+/*
+ * parse_port_range - Parse "low-high" format
+ */
+static bool parse_port_range(const char* range_str, unsigned short* low, unsigned short* high) {
+    char* dash = strchr(range_str, '-');
+    if (!dash) return false;
+    
+    *low = atoi(range_str);
+    *high = atoi(dash + 1);
+    
+    return (*low > 0 && *high > 0 && *low <= *high);
+}
+
+/*
+ * main - Entry point
+ * 
+ * Every C program starts executing here.
+ * argc = argument count, argv = argument vector (array of strings)
+ */
+int main(int argc, char* argv[]) {
+    /* Check if running with root privileges for some operations */
+    /* Note: We don't require root for listing, only for killing */
+    
+    if (argc < 2) {
+        display_help(argv[0]);
+        return 1;
+    }
+    
+    Command cmd;
+    Options opts = {0};  /* Initialize all fields to 0 */
+    opts.format = FORMAT_TABLE;
+    
+    /* Parse the command */
+    const char* cmd_str = argv[1];
+    if (strcmp(cmd_str, "list") == 0 || strcmp(cmd_str, "ls") == 0) {
+        cmd = CMD_LIST;
+    } else if (strcmp(cmd_str, "kill") == 0) {
+        cmd = CMD_KILL;
+    } else if (strcmp(cmd_str, "find") == 0) {
+        cmd = CMD_FIND;
+    } else if (strcmp(cmd_str, "check") == 0) {
+        cmd = CMD_CHECK;
+    } else if (strcmp(cmd_str, "help") == 0 || strcmp(cmd_str, "--help") == 0 || strcmp(cmd_str, "-h") == 0) {
+        cmd = CMD_HELP;
+    } else if (strcmp(cmd_str, "version") == 0 || strcmp(cmd_str, "--version") == 0) {
+        cmd = CMD_VERSION;
+    } else {
+        display_error("Unknown command. Use 'portmap help' for usage.");
+        return 1;
+    }
+    
+    /* Parse options */
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+            opts.port = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--range") == 0 && i + 1 < argc) {
+            if (!parse_port_range(argv[++i], &opts.range_low, &opts.range_high)) {
+                display_error("Invalid port range format. Use: --range 3000-4000");
+                return 1;
+            }
+        } else if (strcmp(argv[i], "--tcp") == 0) {
+            opts.tcp_only = true;
+        } else if (strcmp(argv[i], "--udp") == 0) {
+            opts.udp_only = true;
+        } else if (strcmp(argv[i], "--json") == 0) {
+            opts.format = FORMAT_JSON;
+        } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
+            opts.force = true;
+        }
+    }
+    
+    /* Execute command */
+    switch (cmd) {
+        case CMD_LIST:
+            return cmd_list(&opts);
+            
+        case CMD_KILL:
+            if (argc < 3 || !is_numeric(argv[2])) {
+                display_error("Usage: portmap kill <port>");
+                return 1;
+            }
+            return cmd_kill(atoi(argv[2]), opts.force);
+            
+        case CMD_FIND:
+            if (argc < 3) {
+                display_error("Usage: portmap find <process_name>");
+                return 1;
+            }
+            return cmd_find(argv[2]);
+            
+        case CMD_CHECK:
+            if (argc < 3 || !is_numeric(argv[2])) {
+                display_error("Usage: portmap check <port>");
+                return 1;
+            }
+            return cmd_check(atoi(argv[2]));
+            
+        case CMD_HELP:
+            display_help(argv[0]);
+            return 0;
+            
+        case CMD_VERSION:
+            display_version();
+            return 0;
+            
+        default:
+            display_error("Unknown command");
+            return 1;
+    }
+    
+    return 0;
+}
