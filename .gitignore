@@ -1,0 +1,35 @@
+# .gitignore for portmap project
+
+# Build artifacts
+build/
+portmap
+*.o
+*.so
+*.a
+
+# Test executables
+tests/test_utils
+tests/test_port_scanner
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.kate-swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Snap build
+*.snap
+parts/
+prime/
+stage/
+snap/.snapcraft/
+
+# Temporary files
+*.tmp
+*.bak
