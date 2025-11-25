@@ -1,0 +1,42 @@
+name: portmap
+base: core22
+version: '1.0.0'
+summary: Smart port manager for Linux
+description: |
+  portmap is a user-friendly command-line tool for managing network ports on Linux.
+  It provides an easier interface than lsof and netstat for common port management
+  tasks that developers face daily.
+  
+  Features:
+  - List all active ports with process information
+  - Kill processes by port number
+  - Find ports by process name
+  - Check port availability
+  - Filter by port range and protocol
+  - JSON output support for scripting
+
+grade: stable
+confinement: strict
+
+apps:
+  portmap:
+    command: bin/portmap
+    plugs:
+      - network-observe
+      - system-observe
+      - process-control
+      - network-control
+
+parts:
+  portmap:
+    plugin: make
+    source: .
+    build-packages:
+      - gcc
+      - make
+    stage-packages:
+      - libc6
+    override-build: |
+      make
+      mkdir -p $SNAPCRAFT_PART_INSTALL/bin
+      cp portmap $SNAPCRAFT_PART_INSTALL/bin/
