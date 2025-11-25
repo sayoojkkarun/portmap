@@ -11,7 +11,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-/* 
+/*
  * Color codes for terminal output
  * These are ANSI escape sequences that make text colorful in the terminal
  */
@@ -32,45 +32,45 @@
  */
 
 /* Trims whitespace from both ends of a string */
-char* trim_whitespace(char* str);
+char *trim_whitespace(char *str);
 
 /* Safely copies a string with size limit (safer than strcpy) */
-void safe_string_copy(char* dest, const char* src, size_t dest_size);
+void safe_string_copy(char *dest, const char *src, size_t dest_size);
 
 /* Checks if a string contains a substring (case-insensitive) */
-bool string_contains(const char* haystack, const char* needle);
+bool string_contains(const char *haystack, const char *needle);
 
 /*
  * File reading utilities
  */
 
 /* Reads an entire file into a dynamically allocated string */
-char* read_file_contents(const char* filepath);
+char *read_file_contents(const char *filepath);
 
 /* Reads a single line from a file */
-bool read_line(FILE* file, char* buffer, size_t buffer_size);
+bool read_line(FILE *file, char *buffer, size_t buffer_size);
 
 /*
  * Number parsing utilities
  */
 
 /* Parses a hexadecimal string to unsigned long (for parsing /proc files) */
-unsigned long parse_hex(const char* hex_str);
+unsigned long parse_hex(const char *hex_str);
 
 /* Checks if a string is a valid number */
-bool is_numeric(const char* str);
+bool is_numeric(const char *str);
 
 /* Converts port number from network byte order to host byte order */
-unsigned short parse_port(const char* port_hex);
+unsigned short parse_port(const char *port_hex);
 
 /*
  * Error handling
  */
 
 /* Prints an error message and exits the program */
-void die(const char* message);
+void die(const char *message);
 
 /* Prints an error message with errno details */
-void die_errno(const char* message);
+void die_errno(const char *message);
 
 #endif /* UTILS_H */
