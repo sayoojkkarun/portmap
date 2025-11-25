@@ -4,6 +4,9 @@
  * Copyright (c) 2025 Aerlync Labs Inc.
  */
 
+/* POSIX feature test macro - enables strdup() */
+#define _POSIX_C_SOURCE 200809L
+
 /*
  * main.c - Entry point for portmap tool
  * 
@@ -18,7 +21,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>  /* For getopt */
+#include <strings.h>   /* For strcasecmp */
+#include <ctype.h>     /* For tolower, isalnum */
+#include <unistd.h>    /* For getopt */
 
 /*
  * Command types - what the user wants to do
@@ -220,9 +225,43 @@ static int cmd_find(const char* search_term) {
         if (pid > 0) {
             ProcessInfo proc;
             if (get_process_info(pid, &proc)) {
-                /* Check if command or cmdline contains search term */
-                if (string_contains(proc.command, search_term) || 
-                    string_contains(proc.cmdline, search_term)) {
+                bool match = false;
+                
+                /* Check for exact match in command name first */
+                if (strcasecmp(proc.command, search_term) == 0) {
+                    match = true;
+                }
+                
+                /* If no exact match, check for word boundary match in cmdline */
+                if (!match) {
+                    char* cmdline_lower = strdup(proc.cmdline);
+                    char* search_lower = strdup(search_term);
+                    
+                    if (cmdline_lower && search_lower) {
+                        /* Convert both to lowercase */
+                        for (char* p = cmdline_lower; *p; p++) *p = tolower(*p);
+                        for (char* p = search_lower; *p; p++) *p = tolower(*p);
+                        
+                        /* Look for word boundaries */
+                        char* pos = cmdline_lower;
+                        while ((pos = strstr(pos, search_lower)) != NULL) {
+                            /* Check if this is a word boundary */
+                            bool start_ok = (pos == cmdline_lower || !isalnum(*(pos-1)));
+                            bool end_ok = !isalnum(*(pos + strlen(search_lower)));
+                            
+                            if (start_ok && end_ok) {
+                                match = true;
+                                break;
+                            }
+                            pos++;
+                        }
+                    }
+                    
+                    free(cmdline_lower);
+                    free(search_lower);
+                }
+                
+                if (match) {
                     port_list_add(filtered, p);
                 }
             }
