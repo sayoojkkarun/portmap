@@ -35,6 +35,23 @@ sudo snap connect portmap:system-observe
 sudo snap connect portmap:process-control
 ```
 
+### Snap Interface Permissions
+
+The `portmap` snap uses strict confinement and requires several interfaces.
+
+-   **Defined Interfaces**: `network-observe`, `system-observe`, `process-control`, `network-control`.
+-   **Auto-Connection**: Some of these (like `process-control`) are **not** auto-connected by default for security reasons.
+-   **Action Required**: You may need to request auto-connection for these interfaces on the [Snapcraft Forum](https://forum.snapcraft.io/) to ensure the best user experience.
+
+> **Note**: The request for auto-connection of these interfaces is currently pending approval. Until approved, manual connection is required.
+
+If not auto-connected, users must manually run:
+```bash
+sudo snap connect portmap:process-control
+sudo snap connect portmap:system-observe
+# ... etc
+```
+
 ## Usage
 
 ### Basic Commands
