@@ -20,7 +20,7 @@ A user-friendly command-line tool for managing network ports on Linux. Provides 
 ### From Source
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/sayoojkkarun/portmap.git
 cd portmap
 make
 sudo make install
